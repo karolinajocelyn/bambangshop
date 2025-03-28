@@ -1,4 +1,4 @@
-=use std::thread;
+use std::thread;
 
 use bambangshop::{Result, compose_error_response};
 use rocket::http::Status;
@@ -7,9 +7,9 @@ use crate::model::product::Product;
 use crate::model::subscriber::Subscriber;
 use crate::repository::subscriber::SubscriberRepository;
 
-pub struct NotificationServive;
+pub struct NotificationService;
 
-impl NotificationServive {
+impl NotificationService {
     pub fn subscribe(product_type: &str, subscriber: Subscriber) -> Result<Subscriber> {
         let product_type_upper = product_type.to_uppercase();
         let product_type_str = product_type_upper.as_str();
