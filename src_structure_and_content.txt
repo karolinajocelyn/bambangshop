@@ -1,0 +1,368 @@
+STRUKTUR DIREKTORI
+====================
+src/
+  lib.rs
+  main.rs
+  repository/
+    subscriber.rs
+    mod.rs
+    product.rs
+  controller/
+    mod.rs
+    product.rs
+  model/
+    notification.rs
+    subscriber.rs
+    mod.rs
+    product.rs
+  service/
+    mod.rs
+    product.rs
+
+DETAIL FILE
+====================
+
+/lib.rs
+----------------------------------------
+use lazy_static::lazy_static;
+use dotenvy::dotenv;
+use getset::Getters;
+use rocket::figment::{Figment, providers::{Serialized, Env}};
+use rocket::http::Status;
+use rocket::serde::json::Json;
+use rocket::serde::{Deserialize, Serialize};
+use rocket::response::status::Custom;
+use reqwest::{Client, ClientBuilder};
+
+lazy_static! {
+    pub static ref REQWEST_CLIENT: Client = ClientBuilder::new().build().unwrap();
+    pub static ref APP_CONFIG: AppConfig = AppConfig::generate();
+}
+
+#[derive(Debug, Deserialize, Serialize, Getters)]
+#[serde(crate = "rocket::serde")]
+pub struct AppConfig {
+    #[getset(get = "pub with_prefix")]
+    instance_root_url: String
+}
+
+impl Default for AppConfig {
+    fn default() -> AppConfig {
+        return AppConfig {
+            instance_root_url: String::from("http://localhost:8001")
+        }
+    }
+}
+
+impl AppConfig {
+    pub fn generate() -> AppConfig {
+        dotenv().ok();
+        return Figment::from(Serialized::defaults(AppConfig::default()))
+            .merge(Env::prefixed("APP_").global())
+            .extract().unwrap();
+    }
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+pub type Error = Custom<Json<ErrorResponse>>;
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(crate = "rocket::serde")]
+pub struct ErrorResponse {
+    pub status_code: Status,
+    pub message: String
+}
+
+pub fn compose_error_response(status_code: Status, message: String) -> Custom<Json<ErrorResponse>> {
+    return Custom(status_code, Json::from(
+        ErrorResponse {
+            status_code: status_code,
+            message: message,
+        }
+    ));
+}
+
+
+/main.rs
+----------------------------------------
+#[macro_use] extern crate rocket;
+
+pub mod controller;
+pub mod service;
+pub mod repository;
+pub mod model;
+
+use dotenvy::dotenv;
+use crate::controller::route_stage;
+
+#[launch]
+fn rocket() -> _ {
+    dotenv().ok();
+    rocket::build()
+        .manage(reqwest::Client::builder().build().unwrap())
+        .attach(route_stage())
+}
+
+
+/repository/subscriber.rs
+----------------------------------------
+use dashmap::DashMap;
+use lazy_static::lazy_static;
+use crate::model::subscriber::Subscriber;
+
+lazy_static! {
+    pub static ref SUBSCRIBERS: DashMap<String, Subscriber> = DashMap::new();
+}
+
+pub struct SubscriberRepository;
+
+impl SubscriberRepository {
+    pub fn add(product_type: &str, subscriber: Subscriber) -> Subscriber {
+        let subscriber_value = subscriber.clone();
+        if SUBSCRIBERS.get(product_type).is_none() {
+            SUBSCRIBERS.insert(String::from(product_type), DashMap::new());
+        }
+
+        SUBSCRIBERS.get(product_type).unwrap().insert(subscriber.url.clone(), subscriber_value);
+        return subscriber;
+    }
+
+    pub fn list_all(product_type: &str) -> Vec<Subscriber> {
+        if SUBSCRIBERS.get(product_type).is_none() {
+            SUBSCRIBERS.insert(String::from(product_type), DashMap::new());
+        }
+        return SUBSCRIBERS.get(product_type).unwrap().iter().map(|f| f.value().clone()).collect();
+    }
+
+    pub fn delete(product_type: &str, url: &str) -> Option<Subscriber> {
+        if SUBSCRIBERS.get(product_type).is_none() {
+            SUBSCRIBERS.insert(String::from(product_type), DashMap::new());
+        }
+        
+        let result = SUBSCRIBERS.get(product_type).unwrap().remove(url);
+        if result.is_none() {
+            return Some(result.unwrap().1);
+        }
+        return None;
+    }
+}
+
+/repository/mod.rs
+----------------------------------------
+pub mod product;
+pub mod subscriber;
+
+
+/repository/product.rs
+----------------------------------------
+use dashmap::DashMap;
+use lazy_static::lazy_static;
+use crate::model::product::Product;
+
+// Singleton of Database
+lazy_static! {
+    static ref PRODUCTS: DashMap<usize, Product> = DashMap::new();
+}
+
+pub struct ProductRepository;
+
+impl ProductRepository {
+    pub fn add(mut product: Product) -> Product {
+        product.id = PRODUCTS.len();
+        let product_value = product.clone();
+        PRODUCTS.insert(product_value.id, product_value);
+        return product;
+    }
+
+    pub fn list_all() -> Vec<Product> {
+        return PRODUCTS.iter().map(|f| f.value().clone()).collect();
+    }
+
+    pub fn get_by_id(id: usize) -> Option<Product> {
+        let result = PRODUCTS.get(&id);
+        if !result.is_none() {
+            return Some(result.unwrap().clone());
+        }
+        return None;
+    }
+
+    pub fn delete(id: usize) -> Option<Product> {
+        let result = PRODUCTS.remove(&id);
+        if !result.is_none() {
+            return Some(result.unwrap().1);
+        }
+        return None;
+    }
+}
+
+
+/controller/mod.rs
+----------------------------------------
+pub mod product;
+
+use rocket::fairing::AdHoc;
+
+pub fn route_stage() -> AdHoc {
+    return AdHoc::on_ignite("Initializing controller routes...", |rocket| async {
+        rocket
+            .mount("/product", routes![product::create, product::list, product::read, product::delete])
+    });
+}
+
+
+/controller/product.rs
+----------------------------------------
+use rocket::response::status::Created;
+use rocket::serde::json::Json;
+
+use bambangshop::Result;
+use crate::model::product::Product;
+use crate::service::product::ProductService;
+
+
+#[post("/", data = "<product>")]
+pub fn create(product: Json<Product>) -> Result<Created<Json<Product>>> {
+    return match ProductService::create(product.into_inner()) {
+        Ok(f) => Ok(Created::new("/").body(Json::from(f))),
+        Err(e) => Err(e)
+    };
+}
+
+#[get("/")]
+pub fn list() -> Result<Json<Vec<Product>>> {
+    return match ProductService::list() {
+        Ok(f) => Ok(Json::from(f)),
+        Err(e) => Err(e)
+    };
+}
+
+#[get("/<id>")]
+pub fn read(id: usize) -> Result<Json<Product>> {
+    return match ProductService::read(id) {
+        Ok(f) => Ok(Json::from(f)),
+        Err(e) => Err(e)
+    };
+}
+
+#[delete("/<id>")]
+pub fn delete(id: usize) -> Result<Json<Product>> {
+    return match ProductService::delete(id) {
+        Ok(f) => Ok(Json::from(f)),
+        Err(e) => Err(e)
+    };
+}
+
+
+/model/notification.rs
+----------------------------------------
+use rocket::serde::{Deserialize, Serialize};
+ 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct Notification {
+    pub product_title: String,
+    pub product_type: String,
+    pub product_url: String,
+    pub subscriber_name: String,
+    pub status: String,
+}
+
+/model/subscriber.rs
+----------------------------------------
+use rocket::serde::{Deserialize, Serialize};
+use rocket::log;
+use rocket::serde::json::to_string;
+use rocket::tokio;
+use bambangshop::REQWEST_CLIENT;
+use crate::model::notification::Notification;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct Subscriber {
+    pub url: String,
+    pub name: String,
+}
+
+/model/mod.rs
+----------------------------------------
+pub mod product;
+pub mod subscriber;
+pub mod notification;
+
+/model/product.rs
+----------------------------------------
+use rocket::serde::{Serialize, Deserialize};
+
+use bambangshop::APP_CONFIG;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+pub struct Product {
+    #[serde(skip_deserializing)]
+    pub id: usize,
+    pub title: String,
+    pub description: String,
+    pub price: f64,
+    pub product_type: String,
+}
+
+impl Product {
+    pub fn get_url(&self) -> String {
+        return format!("{}/product/{}", APP_CONFIG.get_instance_root_url(), self.id);
+    }
+}
+
+
+/service/mod.rs
+----------------------------------------
+pub mod product;
+
+
+/service/product.rs
+----------------------------------------
+use rocket::http::Status;
+use rocket::serde::json::Json;
+
+use bambangshop::{Result, compose_error_response};
+use crate::model::product::Product;
+use crate::repository::product::ProductRepository;
+
+pub struct ProductService;
+
+impl ProductService {
+    pub fn create(mut product: Product) -> Result<Product> {
+        product.product_type = product.product_type.to_uppercase();
+        let product_result: Product = ProductRepository::add(product);
+
+        return Ok(product_result);
+    }
+
+    pub fn list() -> Result<Vec<Product>> {
+        return Ok(ProductRepository::list_all());
+    }
+
+    pub fn read(id: usize) -> Result<Product> {
+        let product_opt: Option<Product> = ProductRepository::get_by_id(id);
+        if product_opt.is_none() {
+            return Err(compose_error_response(
+                Status::NotFound,
+                String::from("Product not found.")
+            ));
+        }
+        return Ok(product_opt.unwrap());
+    }
+
+    pub fn delete(id: usize) -> Result<Json<Product>> {
+        let product_opt: Option<Product> = ProductRepository::delete(id);
+        if product_opt.is_none() {
+            return Err(compose_error_response(
+                Status::NotFound,
+                String::from("Product not found.")
+            ));
+        }
+        let product: Product = product_opt.unwrap();
+
+        return Ok(Json::from(product));
+    }
+}
