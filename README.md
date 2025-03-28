@@ -99,20 +99,23 @@ DashMap lebih direkomendasikan karena beberapa alasan, yakni:
 - DashMap lebih optimal untuk skenario high concurrency karena tidak mengunci seluruh data, berbeda dengan Mutex yang mengunci akses ke seluruh map.
 
 #### Reflection Publisher-2
-1. 
+
+1. In the Model-View Controller (MVC) compound pattern, there is no “Service” and “Repository”. Model in MVC covers both data storage and business logic. Explain based on your understanding of design principles, why we need to separate “Service” and “Repository” from a Model?
 
 Dalam MVC tradisional, Model memang menggabungkan logika bisnis dan akses data. Namun, pemisahan Service dan Repository dilakukan karena prinsip desain berikut:
 - **Single Reponsibility Principle (SRP)**, dimana Repository bertugas hanya untuk mengelola interaksi dengan penyimpanan data (CRUD). Service hanya mengimplementasikan logika bisnis seperti validasi, transformasi data, notifikasi. Contohnya, ProductRepository hanya menyimpan data produk, sementara ProductService mengatur aturan bisnis seperti mengubah product_type menjadi huruf besar.
 - **Dependency Inversion Principle (DIP)**, dimana service bergantung pada abstraksi Repository (meski di Rust tidak menggunakan trait di sini), sehingga memudahkan perubahan storage seperti dari DashMap ke database tanpa mengganggu logika bisnis.
 - **Reusability dan Testability**, dimana service bisa digunakan oleh banyak controller seperti API dan CLI, sementara Repository mudah di-mock untuk pengujian.
 
-2. 
+2. What happens if we only use the Model? Explain your imagination on how the interactions between each model (Program, Subscriber, Notification) affect the code complexity for each model?
+
 Jika semua logika bisnis dan penyimpanan digabung dalam Model, dampaknya adalah:
 - Tingginya keterikatan atau coupling karena perubahan pada penyimpanan data seperti mengganti DashMap dengan database akan memaksa modifikasi langsung di Model, yang berisiko merusak logika bisnis.
 - Kompleksitas model, sebagai contoh Product harus mengurus storage (DashMap) dan validasi harga, Subscriber akan menangani HTTP request untuk notifikasi dan penyimpanan URL.
 - Duplikasi kode, logika seperti "notifikasi ke subscriber" harus diulang di setiap Model (Product, Notification), alih-alih dipusatkan di Service.
 
-3. 
+3. Have you explored more about Postman? Tell us how this tool helps you to test your current work. You might want to also list which features in Postman you are interested in or feel like it is helpful to help your Group Project or any of your future software engineering projects.
+
 Peran postman sangat membantu untuk:
 - Menguji endpoint seperti POST /product atau POST /notification/subscribe tanpa menulis kode client.
 - Memudahkan pengujian API tanpa perlu menulis kode client manual
@@ -133,3 +136,38 @@ Dalam project ini, postman sangat berguna untuk:
 - Memastikan konsistensi format respons API
 
 #### Reflection Publisher-3
+
+1. Observer Pattern has two variations: Push model (publisher pushes data to subscribers) and Pull model (subscribers pull data from publisher). In this tutorial case, which variation of Observer Pattern that we use?
+
+Pada kode ini digunakan Push Model. Ini terlihat dari cara ProductService mengirim data lengkap ke subscriber via HTTP POST saat notifikasi. Contoh di service/product.rs:
+
+`NotificationService.notify(&product.product_type, "CREATED", product_result.clone());`
+
+Dan di model/subscriber.rs, subscriber langsung menerima payload lengkap:
+
+`REQWEST_CLIENT.post(&self.url).body(to_string(&payload).unwrap())`
+
+Publisher (Product) aktif mengirim semua data yang diperlukan ke subscriber tanpa perlu subscriber menarik data tambahan.
+
+2. What are the advantages and disadvantages of using the other variation of Observer Pattern for this tutorial case? (example: if you answer Q1 with Push, then imagine if we used Pull)
+
+Jika pakai Pull Model (subscriber ambil data sendiri dari publisher), kelebihannya adalah:
+- Subscriber bisa kontrol data yang diambil (e.g., hanya butuh product_url saja)
+- Mengurangi ukuran data yang dikirim saat notifikasi
+
+Kekurangannya adalah:
+- Subscriber harus tahu cara akses API Product (/product/<id>), menambah kompleksitas
+- Beban server meningkat karena banyak request ke endpoint Product
+- Rentan error jika Product sudah dihapus sebelum subscriber melakukan pull
+
+3 Explain what will happen to the program if we decide to not use multi-threading in the notification process.
+
+Jika thread::spawn di service/notification.rs dihapus:
+`// Tanpa thread::spawn
+subscriber.update(payload.clone());`
+
+Maka, hal ini akan mengakibatkan:
+- Blocking request, dimana setiap HTTP POST ke subscriber akan menunggu sampai selesai sebelum melanjutkan proses.
+- Lambatnya response API, dimana waktu tunggu API create/publish/delete product akan bergantung pada subscriber paling lambat.
+- Error berantai, karena jika satu subscriber down/lemot, seluruh proses notifikasi dan operasi product akan terhambat.
+- Scalability buruk karena jumlah subscriber yang besar akan membuat sistem sulit menangani beban tinggi.
