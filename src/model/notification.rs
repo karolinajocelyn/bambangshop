@@ -1,6 +1,6 @@
 use rocket::serde::{Deserialize, Serialize};
- 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
 pub struct Notification {
     pub product_title: String,

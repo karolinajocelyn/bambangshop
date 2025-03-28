@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use crate::model::subscriber::Subscriber;
 
 lazy_static! {
-    pub static ref SUBSCRIBERS: DashMap<String, Subscriber> = DashMap::new();
+    static ref SUBSCRIBERS: DashMap<String, DashMap<String, Subscriber>> = DashMap::new();
 }
 
 pub struct SubscriberRepository;
@@ -13,26 +13,29 @@ impl SubscriberRepository {
         let subscriber_value = subscriber.clone();
         if SUBSCRIBERS.get(product_type).is_none() {
             SUBSCRIBERS.insert(String::from(product_type), DashMap::new());
-        }
+        };
 
-        SUBSCRIBERS.get(product_type).unwrap().insert(subscriber.url.clone(), subscriber_value);
+        SUBSCRIBERS.get(product_type).unwrap()
+            .insert(subscriber_value.url.clone(), subscriber_value);
         return subscriber;
     }
 
     pub fn list_all(product_type: &str) -> Vec<Subscriber> {
         if SUBSCRIBERS.get(product_type).is_none() {
             SUBSCRIBERS.insert(String::from(product_type), DashMap::new());
-        }
-        return SUBSCRIBERS.get(product_type).unwrap().iter().map(|f| f.value().clone()).collect();
+        };
+
+        return SUBSCRIBERS.get(product_type).unwrap().iter()
+            .map(|f| f.value().clone()).collect();
     }
 
     pub fn delete(product_type: &str, url: &str) -> Option<Subscriber> {
         if SUBSCRIBERS.get(product_type).is_none() {
             SUBSCRIBERS.insert(String::from(product_type), DashMap::new());
-        }
-        
-        let result = SUBSCRIBERS.get(product_type).unwrap().remove(url);
-        if result.is_none() {
+        };
+        let result = SUBSCRIBERS.get(product_type).unwrap()
+            .remove(url);
+        if !result.is_none() {
             return Some(result.unwrap().1);
         }
         return None;
