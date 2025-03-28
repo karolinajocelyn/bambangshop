@@ -99,6 +99,37 @@ DashMap lebih direkomendasikan karena beberapa alasan, yakni:
 - DashMap lebih optimal untuk skenario high concurrency karena tidak mengunci seluruh data, berbeda dengan Mutex yang mengunci akses ke seluruh map.
 
 #### Reflection Publisher-2
+1. 
 
+Dalam MVC tradisional, Model memang menggabungkan logika bisnis dan akses data. Namun, pemisahan Service dan Repository dilakukan karena prinsip desain berikut:
+- **Single Reponsibility Principle (SRP)**, dimana Repository bertugas hanya untuk mengelola interaksi dengan penyimpanan data (CRUD). Service hanya mengimplementasikan logika bisnis seperti validasi, transformasi data, notifikasi. Contohnya, ProductRepository hanya menyimpan data produk, sementara ProductService mengatur aturan bisnis seperti mengubah product_type menjadi huruf besar.
+- **Dependency Inversion Principle (DIP)**, dimana service bergantung pada abstraksi Repository (meski di Rust tidak menggunakan trait di sini), sehingga memudahkan perubahan storage seperti dari DashMap ke database tanpa mengganggu logika bisnis.
+- **Reusability dan Testability**, dimana service bisa digunakan oleh banyak controller seperti API dan CLI, sementara Repository mudah di-mock untuk pengujian.
+
+2. 
+Jika semua logika bisnis dan penyimpanan digabung dalam Model, dampaknya adalah:
+- Tingginya keterikatan atau coupling karena perubahan pada penyimpanan data seperti mengganti DashMap dengan database akan memaksa modifikasi langsung di Model, yang berisiko merusak logika bisnis.
+- Kompleksitas model, sebagai contoh Product harus mengurus storage (DashMap) dan validasi harga, Subscriber akan menangani HTTP request untuk notifikasi dan penyimpanan URL.
+- Duplikasi kode, logika seperti "notifikasi ke subscriber" harus diulang di setiap Model (Product, Notification), alih-alih dipusatkan di Service.
+
+3. 
+Peran postman sangat membantu untuk:
+- Menguji endpoint seperti POST /product atau POST /notification/subscribe tanpa menulis kode client.
+- Memudahkan pengujian API tanpa perlu menulis kode client manual
+- Menyediakan fitur Collections untuk mengorganisir berbagai endpoint terkait
+- Memungkinkan penggunaan Environment Variables untuk pengelolaan konfigurasi
+- Mendukung Automated Testing melalui Collection Runner dan Newman
+- Membuat dokumentasi API otomatis dari koleksi yang ada
+- Menyediakan Mock Server untuk pengembangan frontend sebelum backend siap
+- Memfasilitasi kolaborasi tim melalui shared workspace
+- Menawarkan Pre-request Scripts untuk otomatisasi tugas testing
+- Memungkinkan pengujian berbagai skenario termasuk error handling
+- Menyederhanakan verifikasi respons API dan format data
+
+Dalam project ini, postman sangat berguna untuk:
+- Menguji seluruh CRUD operations untuk Product
+- Memverifikasi fungsi subscribe/unsubscribe Notification
+- Mengecek error handling seperti saat data tidak ditemukan
+- Memastikan konsistensi format respons API
 
 #### Reflection Publisher-3
